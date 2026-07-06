@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI関連銘柄インテリジェンス ダッシュボード</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="app-header">
+    <div class="app-header-inner">
+      <h1>AI関連銘柄インテリジェンス</h1>
+      <p class="subtitle">株価・関連ニュース・AIセンチメント分析を毎日自動更新</p>
+      <p class="last-updated" id="lastUpdated">読み込み中...</p>
+    </div>
+  </header>
+
+  <nav class="tab-nav">
+    <div class="tab-nav-inner">
+      <button class="tab-button active" data-tab="dashboard">銘柄一覧</button>
+      <button class="tab-button" data-tab="trend">価格推移</button>
+    </div>
+  </nav>
+
+  <main class="container">
+    <section id="tab-dashboard" class="tab-panel active">
+      <section class="summary-cards" id="summaryCards"></section>
+
+      <section class="controls">
+        <input type="search" id="searchInput" placeholder="銘柄コード・企業名で検索">
+        <select id="sectorFilter">
+          <option value="">すべてのセクター</option>
+        </select>
+        <select id="sentimentFilter">
+          <option value="">すべてのセンチメント</option>
+          <option value="positive">ポジティブ</option>
+          <option value="neutral">中立</option>
+          <option value="negative">ネガティブ</option>
+        </select>
+        <select id="sortSelect">
+          <option value="impact_desc">影響度が高い順</option>
+          <option value="change_desc">前日比が高い順</option>
+          <option value="change_asc">前日比が低い順</option>
+          <option value="symbol_asc">銘柄コード順</option>
+        </select>
+      </section>
+
+      <section id="cardGrid" class="card-grid">
+        <p class="loading">データを読み込んでいます...</p>
+      </section>
+
+      <section class="ticker-changes">
+        <h2>直近のティッカー変更（過去14日）</h2>
+        <div id="tickerChanges"><p class="loading">読み込み中...</p></div>
+      </section>
+    </section>
+
+    <section id="tab-trend" class="tab-panel">
+      <section class="controls">
+        <select id="trendTickerSelect"></select>
+        <div class="period-toggle" id="periodToggle">
+          <button class="period-button active" data-period="daily">日次</button>
+          <button class="period-button" data-period="weekly">週次</button>
+          <button class="period-button" data-period="monthly">月次</button>
+          <button class="period-button" data-period="yearly">年次</button>
+        </div>
+      </section>
+
+      <section class="trend-chart-wrap">
+        <canvas id="trendChart" height="320"></canvas>
+        <p id="trendEmptyState" class="empty-state" style="display:none;">この銘柄のデータがまだありません。</p>
+      </section>
+
+      <section class="trend-table-wrap">
+        <table class="trend-table">
+          <thead>
+            <tr>
+              <th>期間</th>
+              <th>株価</th>
+              <th>前日比</th>
+              <th>センチメント</th>
+            </tr>
+          </thead>
+          <tbody id="trendTableBody"></tbody>
+        </table>
+      </section>
+    </section>
+  </main>
+
+  <footer class="app-footer">
+    <p>Data source: Supabase (ai_stock_intelligence / ai_stock_tickers) — 毎日06:00 JST自動更新、毎週月曜07:00 JSTに銘柄見直し</p>
+  </footer>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

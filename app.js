@@ -276,27 +276,46 @@ function populateTrendTickerSelect() {
   }
 }
 
-function startOfWeek(date) {
-  const d = new Date(date);
-  const day = d.getDay();
-  const diff = (day === 0 ? -6 : 1) - day;
-  d.setDate(d.getDate() + diff);
-  d.setHours(0, 0, 0, 0);
-  return d;
+// 集計はすべて日本時間（JST）の暦日基準で行う。
+// recorded_at はUTCで保存されているため、閲覧者のブラウザのタイムゾーンに関係なく
+// 常にJSTの日付として扱う必要がある（さもないと06:00 JST実行分が前日扱いになる）。
+function jstDateParts(input) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Tokyo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date(input));
+  const map = Object.fromEntries(parts.map((p) => [p.type, p.value]));
+  return { year: Number(map.year), month: Number(map.month), day: Number(map.day) };
+}
+
+function jstDateKey(input) {
+  const { year, month, day } = jstDateParts(input);
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function startOfWeekJst(input) {
+  const { year, month, day } = jstDateParts(input);
+  const utcMidnight = new Date(Date.UTC(year, month - 1, day));
+  const dow = utcMidnight.getUTCDay();
+  const diff = (dow === 0 ? -6 : 1) - dow;
+  utcMidnight.setUTCDate(utcMidnight.getUTCDate() + diff);
+  return utcMidnight.toISOString().slice(0, 10);
 }
 
 function periodKey(recordedAt, period) {
-  const d = new Date(recordedAt);
+  const { year, month } = jstDateParts(recordedAt);
   switch (period) {
     case "weekly":
-      return startOfWeek(d).toISOString().slice(0, 10);
+      return startOfWeekJst(recordedAt);
     case "monthly":
-      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      return `${year}-${String(month).padStart(2, "0")}`;
     case "yearly":
-      return `${d.getFullYear()}`;
+      return `${year}`;
     case "daily":
     default:
-      return d.toISOString().slice(0, 10);
+      return jstDateKey(recordedAt);
   }
 }
 
@@ -312,8 +331,8 @@ function periodLabel(key, period) {
       return `${key}年`;
     case "daily":
     default: {
-      const d = new Date(key);
-      return d.toLocaleDateString("ja-JP", { month: "numeric", day: "numeric" });
+      const [, m, d] = key.split("-");
+      return `${Number(m)}/${Number(d)}`;
     }
   }
 }

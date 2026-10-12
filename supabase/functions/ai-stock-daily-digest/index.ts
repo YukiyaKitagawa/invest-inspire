@@ -19,6 +19,7 @@ type UsRow = {
   market_sentiment: string | null;
   impact_score: number | null;
   news_summary: string | null;
+  recorded_at: string;
 };
 
 type JpRow = {
@@ -65,7 +66,7 @@ async function buildUsSection(supabase: ReturnType<typeof createClient>): Promis
 
   const { data: latest, error: latestError } = await supabase
     .from("ai_stock_intelligence_latest")
-    .select("ticker_symbol, current_price, price_change_pct, market_sentiment, impact_score, news_summary");
+    .select("ticker_symbol, current_price, price_change_pct, market_sentiment, impact_score, news_summary, recorded_at");
   if (latestError) throw new Error(`Failed to load US latest snapshot: ${latestError.message}`);
 
   const rows = (latest ?? []).filter((r) => activeSymbols.has(r.ticker_symbol)) as UsRow[];
@@ -86,9 +87,16 @@ async function buildUsSection(supabase: ReturnType<typeof createClient>): Promis
       `注目理由: ${summary}`;
   });
 
-  const today = new Date().toLocaleDateString("ja-JP", { timeZone: "Asia/Tokyo", year: "numeric", month: "numeric", day: "numeric" });
+  // 見出しの日付は実行日ではなく、データの実際の記録日を使う。以前は実行日を常に表示していたため、
+  // 米国側の更新が止まっていても「本日」のデータのように見えてしまっていた。
+  const fmtDate = (d: Date) =>
+    d.toLocaleDateString("ja-JP", { timeZone: "Asia/Tokyo", year: "numeric", month: "numeric", day: "numeric" });
+  const dataDate = fmtDate(new Date(Math.max(...top.map((r) => new Date(r.recorded_at).getTime()))));
+  const staleNote = dataDate !== fmtDate(new Date())
+    ? `\n※最新の米国データは${dataDate}分です（更新が止まっている可能性があります）`
+    : "";
 
-  return `📊 米国AI関連銘柄 本日の注目 Top${top.length}（${today}引け）\n\n${lines.join("\n\n")}`;
+  return `📊 米国AI関連銘柄 本日の注目 Top${top.length}（${dataDate}引け）${staleNote}\n\n${lines.join("\n\n")}`;
 }
 
 async function buildJpSection(supabase: ReturnType<typeof createClient>): Promise<string | null> {
@@ -101,13 +109,39 @@ async function buildJpSection(supabase: ReturnType<typeof createClient>): Promis
   const nameMap = new Map((tickers ?? []).map((t) => [t.ticker_symbol, t.company_name]));
   const activeSymbols = new Set((tickers ?? []).map((t) => t.ticker_symbol));
 
-  const { data: latest, error: latestError } = await supabase
-    .from("jp_stock_intelligence_latest")
-    .select("ticker_symbol, current_price, price_change_pct, market_sentiment, impact_score, news_summary, recorded_at");
-  if (latestError) throw new Error(`Failed to load JP latest snapshot: ${latestError.message}`);
+  // 最新日の分析が未完了（ニュース取得の失敗など）でも、直近の分析済みデータにフォールバックする。
+  // 以前は「最新の行」だけを見ていたため、最新日の分析が空だとJP欄ごと黙って消えていた。
+  const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const { data: analyzed, error: analyzedError } = await supabase
+    .from("jp_stock_intelligence")
+    .select("ticker_symbol, current_price, price_change_pct, market_sentiment, impact_score, news_summary, recorded_at")
+    .not("market_sentiment", "is", null)
+    .gte("recorded_at", since)
+    .order("recorded_at", { ascending: false })
+    .limit(500);
+  if (analyzedError) throw new Error(`Failed to load JP analyzed rows: ${analyzedError.message}`);
 
-  const rows = (latest ?? []).filter((r) => activeSymbols.has(r.ticker_symbol) && r.market_sentiment !== null) as JpRow[];
-  if (rows.length === 0) return null; // JP側の分析がまだ一度も完了していない場合はセクションごと省略
+  const analyzedRows = (analyzed ?? []).filter((r) => activeSymbols.has(r.ticker_symbol)) as JpRow[];
+  if (analyzedRows.length === 0) {
+    // 7日以内に分析済みデータが1件も無い場合は、省略せずに状況を明示する
+    return "🇯🇵 日本株(AI・半導体テーマ)\n分析データを取得できていません（ニュース取得待ち）。";
+  }
+
+  const jstDate = (iso: string) =>
+    new Date(iso).toLocaleDateString("ja-JP", { timeZone: "Asia/Tokyo", month: "numeric", day: "numeric" });
+  const analyzedDate = jstDate(analyzedRows[0].recorded_at);
+  const rows = analyzedRows.filter((r) => jstDate(r.recorded_at) === analyzedDate);
+
+  // 収集済みの最新日と比べて分析が遅れている場合は、その旨を注記する
+  const { data: newest } = await supabase
+    .from("jp_stock_intelligence")
+    .select("recorded_at")
+    .order("recorded_at", { ascending: false })
+    .limit(1);
+  const newestDate = newest?.[0] ? jstDate(newest[0].recorded_at) : analyzedDate;
+  const delayNote = newestDate !== analyzedDate
+    ? `\n※${newestDate}分の分析は取得待ちのため、${analyzedDate}分を表示しています`
+    : "";
 
   const top = rows.slice().sort((a, b) =>
     notabilityScore(b.impact_score, b.price_change_pct) - notabilityScore(a.impact_score, a.price_change_pct)
@@ -124,16 +158,15 @@ async function buildJpSection(supabase: ReturnType<typeof createClient>): Promis
       `注目理由: ${summary}`;
   });
 
-  // JP分析は16:30 JST実行のため、この配信(07:10 JST)時点では前営業日分になる
-  const recordedDate = new Date(top[0].recorded_at).toLocaleDateString("ja-JP", {
-    timeZone: "Asia/Tokyo", year: "numeric", month: "numeric", day: "numeric",
-  });
-
-  return `🇯🇵 日本株(AI・半導体テーマ) 前営業日Top${top.length}（${recordedDate} 16:30時点）\n\n${lines.join("\n\n")}`;
+  // JP分析は16:30 JST実行のため、この配信(07:10 JST)時点では通常は前営業日分になる
+  return `🇯🇵 日本株(AI・半導体テーマ) 前営業日Top${top.length}（${analyzedDate} 16:30時点）${delayNote}\n\n${lines.join("\n\n")}`;
 }
 
-Deno.serve(async (_req) => {
+Deno.serve(async (req) => {
   try {
+    // ?dryRun=1 の場合はLINEへ送信せず、組み立てた本文と文字数だけを返す（動作確認用）
+    const dryRun = new URL(req.url).searchParams.get("dryRun") === "1";
+
     const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
     const [usSection, jpSection] = await Promise.all([
@@ -154,6 +187,12 @@ Deno.serve(async (_req) => {
     const { text, truncated, length } = enforceLineTextLimit(rawText);
     if (truncated) {
       console.warn(`LINE text truncated: ${length} chars (raw ${rawText.length} chars, limit ${LINE_TEXT_MAX_LENGTH})`);
+    }
+
+    if (dryRun) {
+      return new Response(JSON.stringify({ dryRun: true, textLength: length, truncated, text }, null, 2), {
+        headers: { "Content-Type": "application/json" },
+      });
     }
 
     const res = await fetch(LINE_PUSH_URL, {

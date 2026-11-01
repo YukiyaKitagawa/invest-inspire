@@ -6,6 +6,9 @@ const LINE_CHANNEL_ACCESS_TOKEN = Deno.env.get("LINE_CHANNEL_ACCESS_TOKEN")!;
 const LINE_PUSH_USER_ID = "U5adc26764bb82f1c0ceedaffcb8edda4";
 const LINE_PUSH_URL = "https://api.line.me/v2/bot/message/push";
 
+// メッセージの先頭に必ず付ける案内。文字数上限で切り詰める場合も、末尾側が削られるため先頭は残る
+const MESSAGE_HEADER = "本日のセルフカウンセリングはこちら→\nhttps://achievement-portal-private.vercel.app/";
+
 const TOP_N = 3;
 // LINEのtextメッセージはUTF-16で2000文字以内という制約があるため、送信前に必ず確認する
 const LINE_TEXT_MAX_LENGTH = 2000;
@@ -181,7 +184,7 @@ Deno.serve(async (req) => {
     }
 
     const sections = [usSection, jpSection].filter((s): s is string => s !== null);
-    const rawText = sections.join("\n\n━━━━━━━━━━\n\n") +
+    const rawText = `${MESSAGE_HEADER}\n\n` + sections.join("\n\n━━━━━━━━━━\n\n") +
       `\n\n※本情報はAIによる分析結果の共有を目的としており、売買を推奨するものではありません。投資判断はご自身の責任で行ってください。`;
 
     const { text, truncated, length } = enforceLineTextLimit(rawText);
